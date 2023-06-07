@@ -1,11 +1,12 @@
 const Web3 = require('web3')
 const axios = require("axios")
-const { HttpsProxyAgent } = require('https-proxy-agent')
+const {HttpsProxyAgent} = require('https-proxy-agent')
 const fs = require('fs')
 const colors = require('simple-log-colors')
 
 const rpc = 'https://bsc.blockpi.network/v1/rpc/public'
 const ticketCost = 500
+let summaryTickets = 0
 
 const headers = {
   'authority': 'api.cyberconnect.dev',
@@ -55,12 +56,12 @@ async function getNonce(address) {
   return await response.data.data.nonce.data
 }
 
-async function signSignature (message, privateKey, web3) {
+async function signSignature(message, privateKey, web3) {
   let signedMessage = web3.eth.accounts.sign(message, privateKey)
   return signedMessage.signature
 }
 
-async function getAuthToken (address, message, signature, proxy) {
+async function getAuthToken(address, message, signature, proxy) {
   let jsonData = {
     query: '\n    mutation login($address: EVMAddress!, $signature: String!, $signedMessage: String!, $token: String, $isEIP1271: Boolean, $chainId: Int) {\n  login(\n    request: {address: $address, signature: $signature, signedMessage: $signedMessage, token: $token, isEIP1271: $isEIP1271, chainId: $chainId}\n  ) {\n    status\n    message\n    data {\n      id\n      privateInfo {\n        address\n        accessToken\n        kolStatus\n      }\n    }\n  }\n}\n    ',
     variables: {
@@ -111,7 +112,6 @@ async function getFanPoints(authToken, proxy) {
 
 async function insufficientFanPoints(authToken, proxy, fp) {
   let fanPoints = Number(fp)
-
   let rewardsHeaders = {
     'authority': 'api.cyberconnect.dev',
     'accept': '*/*',
@@ -123,7 +123,7 @@ async function insufficientFanPoints(authToken, proxy, fp) {
   }
 
   if (fanPoints >= ticketCost) {
-    let possibleTickets = Math.round(fanPoints / ticketCost)
+    let possibleTickets = Math.floor(fanPoints / ticketCost)
 
     let jsonData = {
       operationName: "consumePoints",
@@ -168,7 +168,11 @@ const clearTrashSymbols = (arr) => {
   return arr.map(el => el.trim())
 }
 
-async function start () {
+function getRandomDelay(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+async function start() {
   let privatesArr
   let proxiesArr
 
@@ -179,26 +183,31 @@ async function start () {
 
   if ((privatesArr.length === proxiesArr.length)) {
     for (let i = 0; i < privatesArr.length; i++) {
-      setTimeout(async () => {
-        let { address, web3 } = await connectToMetaMask(privatesArr[i])
-        let nonce = await getNonce(address)
-        let message = `link3.to wants you to sign in with your Ethereum account:\n${address}\n\n\nURI: https://link3.to\nVersion: 1\nChain ID: 56\nNonce: ${nonce}\nIssued At: 2023-03-19T14:04:18.580Z\nExpiration Time: 2023-04-02T14:04:18.580Z\nNot Before: 2023-03-19T14:04:18.580Z`
-        let signature = await signSignature(message, privatesArr[i], web3)
-        let authToken = await getAuthToken(address, message, signature, proxiesArr[i])
-        let fpTotal = await getFanPoints(authToken, proxiesArr[i])
-        let totalTickets = await insufficientFanPoints(authToken, proxiesArr[i], fpTotal)
+      await new Promise(async (resolve) => {
+        setTimeout(async () => {
+          let {address, web3} = await connectToMetaMask(privatesArr[i])
+          let nonce = await getNonce(address)
+          let message = `link3.to wants you to sign in with your Ethereum account:\n${address}\n\n\nURI: https://link3.to\nVersion: 1\nChain ID: 56\nNonce: ${nonce}\nIssued At: 2023-03-19T14:04:18.580Z\nExpiration Time: 2023-04-02T14:04:18.580Z\nNot Before: 2023-03-19T14:04:18.580Z`
+          let signature = await signSignature(message, privatesArr[i], web3)
+          let authToken = await getAuthToken(address, message, signature, proxiesArr[i])
+          let fpTotal = await getFanPoints(authToken, proxiesArr[i])
+          let totalTickets = await insufficientFanPoints(authToken, proxiesArr[i], fpTotal)
 
-        if (i % 2 === 0) {
-          console.log(`Номер кошелька: ${colors.cyan(i + 1)}`)
-          console.log(`ACCOUNT ADDRESS: ${colors.cyan(address)}`)
-          console.log(colors.magenta(`Total tickets: ${totalTickets}`))
-        } else {
-          console.log(`${(`Номер кошелька: ${colors.green(i + 1)}`)}`)
-          console.log(`ACCOUNT ADDRESS: ${colors.green(address)}`)
-          console.log(colors.magenta(`Total tickets: ${totalTickets}`))
-        }
-        console.log(`==============================================================================================`);
-      }, 5000 * i)
+          summaryTickets += Number(totalTickets)
+
+          if (i % 2 === 0) {
+            console.log(`Номер кошелька: ${colors.cyan(i + 1)}`)
+            console.log(`ACCOUNT ADDRESS: ${colors.cyan(address)}`)
+            console.log(colors.magenta(`Total tickets: ${totalTickets}`))
+          } else {
+            console.log(`${(`Номер кошелька: ${colors.green(i + 1)}`)}`)
+            console.log(`ACCOUNT ADDRESS: ${colors.green(address)}`)
+            console.log(colors.magenta(`Total tickets: ${totalTickets}`))
+          }
+          console.log(`==============================================================================================`)
+          resolve()
+        }, getRandomDelay(3000, 5000))
+      })
     }
   } else {
     if (privatesArr.length > proxiesArr.length) {
@@ -209,6 +218,8 @@ async function start () {
       console.log(`${colors.red(`Непредвиденная ошибка`)}`)
     }
   }
+
+  console.log(colors.blue(`Summary tickets: ${summaryTickets}`))
 }
 
 start()
